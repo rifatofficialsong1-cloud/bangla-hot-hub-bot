@@ -1,8 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const dotenv = require('dotenv');
-const fs = require('fs');
-const path = require('path');
 
 dotenv.config();
 
@@ -12,51 +10,60 @@ const port = process.env.PORT || 3000;
 // বট সেটআপ
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-// ভিডিও স্টোরেজ ফাইল
-const VIDEOS_FILE = './videos.json';
+// মেমরিতে ভিডিও স্টোর
+let videos = [];
 
-// ভিডিও লোড ফাংশন
-function loadVideos() {
-  if (fs.existsSync(VIDEOS_FILE)) {
-    return JSON.parse(fs.readFileSync(VIDEOS_FILE));
+// বুট করার সময় চ্যানেলের পুরানো ভিডিওগুলো নিয়ে আসি
+async function loadOldVideos() {
+  try {
+    const updates = await bot.getUpdates();
+    for (const update of updates) {
+      if (update.channel_post && update.channel_post.video) {
+        const msg = update.channel_post;
+        const exists = videos.find(v => v.message_id === msg.message_id);
+        if (!exists) {
+          videos.push({
+            id: msg.video.file_id,
+            title: msg.caption || 'নতুন ভিডিও',
+            date: msg.date,
+            message_id: msg.message_id
+          });
+        }
+      }
+    }
+    console.log(`${videos.length} টি ভিডিও লোড করা হলো`);
+  } catch (error) {
+    console.log('পুরানো ভিডিও লোড করতে সমস্যা:', error.message);
   }
-  return [];
 }
 
-// ভিডিও সেভ ফাংশন
-function saveVideos(videos) {
-  fs.writeFileSync(VIDEOS_FILE, JSON.stringify(videos, null, 2));
-}
-
-// চ্যানেলের নতুন পোস্ট দেখা
+// নতুন ভিডিও পেলে
 bot.on('channel_post', (msg) => {
   if (msg.video) {
-    const videos = loadVideos();
-    
-    const videoData = {
-      id: msg.video.file_id,
-      title: msg.caption || 'নতুন ভিডিও',
-      date: msg.date,
-      message_id: msg.message_id,
-      channel_id: msg.chat.id
-    };
-    
-    videos.push(videoData);
-    saveVideos(videos);
-    
-    console.log('নতুন ভিডিও স্টোর করা হলো:', videoData.title);
+    const exists = videos.find(v => v.message_id === msg.message_id);
+    if (!exists) {
+      videos.push({
+        id: msg.video.file_id,
+        title: msg.caption || 'নতুন ভিডিও',
+        date: msg.date,
+        message_id: msg.message_id
+      });
+      console.log('নতুন ভিডিও যোগ হলো:', videos.length);
+    }
   }
 });
 
-// অ্যাপের জন্য API
+// API
 app.get('/api/videos', (req, res) => {
-  const videos = loadVideos();
-  res.json(videos.reverse()); // নতুনগুলো আগে দেখাবে
+  res.json(videos.reverse());
 });
 
 app.get('/api/video/:id', (req, res) => {
   res.json({ file_id: req.params.id });
 });
+
+// শুরুতে পুরানো ভিডিও লোড করি
+loadOldVideos();
 
 app.listen(port, () => {
   console.log(`সার্ভার পোর্ট ${port} এ চলছে`);
